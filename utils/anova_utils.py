@@ -98,7 +98,9 @@ def tukey(df: pd.DataFrame, col_trat: str, col_resp: str, alfa=0.05) -> tuple[pd
     
     # Convertimos los resultados a un DataFrame en español
     df_tukey = pd.DataFrame(data=tukey_res._results_table.data[1:], columns=tukey_res._results_table.data[0])
-    df_tukey.columns = ['Grupo 1', 'Grupo 2', 'Diferencia', 'LI', 'LS', 'Rechazar H0']
+    
+    # Se ajusta a 7 columnas para coincidir con la versión actual de statsmodels
+    df_tukey.columns = ['Grupo 1', 'Grupo 2', 'Diferencia', 'p-valor', 'LI', 'LS', 'Rechazar H0']
     
     # Cálculo manual de la DMS (Diferencia Mínima Significativa)
     gl_error = len(df) - len(df[col_trat].unique())
