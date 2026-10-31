@@ -1,8 +1,4 @@
 import streamlit as st
-
-st.title("Diseño Completamente al Azar (DCA)")
-st.info("Módulo en desarrollo")
-import streamlit as st
 import pandas as pd
 import plotly.express as px
 import scipy.stats as stats
@@ -10,11 +6,15 @@ from utils.anova_utils import (
     cargar_datos, validar_dca, ajustar_dca, tabla_anova,
     resumen_tratamientos, coeficiente_variacion, tukey, interpretar_dca
 )
+from utils.diagnostico_utils import (
+    residuos_y_ajustados, prueba_shapiro, prueba_levene, 
+    grafico_residuos_vs_ajustados, grafico_qq
+)
 
 st.title("Diseño Completamente al Azar (DCA)")
 st.write("El DCA se utiliza cuando las unidades experimentales son homogéneas. Ejemplo: Evaluar cuál de 4 secadores solares deja las rodajas de yuca con menor humedad.")
 
-# Carga de datos con caché para no recargar en cada clic
+# Carga de datos con caché
 @st.cache_data
 def load_data(file):
     return cargar_datos(file)
@@ -51,10 +51,9 @@ if not df.empty:
             st.error(error)
         st.stop()
 
-    # Creación de las Pestañas
-    tab1, tab2, tab3, tab4 = st.tabs(["Datos", "ANOVA", "Comparaciones", "Gráficos"])
+    # Creación de las Pestañas (ahora son 5)
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Datos", "ANOVA", "Comparaciones", "Gráficos", "Supuestos"])
 
-    # Pestaña 1: Datos
     with tab1:
         st.subheader("Datos ingresados")
         st.dataframe(df)
@@ -62,33 +61,27 @@ if not df.empty:
         resumen = resumen_tratamientos(df, col_trat, col_resp)
         st.dataframe(resumen)
 
-    # Preparar el ANOVA en memoria
     modelo = ajustar_dca(df, col_trat, col_resp)
     anova = tabla_anova(modelo)
     
-    # Pestaña 2: ANOVA
     with tab2:
         st.subheader("Tabla ANOVA")
         st.dataframe(anova.style.format(precision=4, na_rep="-"))
         
-        # F crítica
         gl_trat = anova.loc['Tratamientos', 'gl']
         gl_err = anova.loc['Error', 'gl']
         f_crit = stats.f.ppf(1 - alfa, gl_trat, gl_err)
         st.write(f"**F crítica ({alfa}):** {f_crit:.4f}")
         
-        # Coeficiente de Variación
         cv = coeficiente_variacion(modelo, df, col_resp)
         st.write(f"**Coeficiente de Variación (CV):** {cv:.2f}%")
         
-        # Interpretación automática
         interpretacion = interpretar_dca(anova, alfa)
         if anova.loc['Tratamientos', 'p-valor'] < alfa:
             st.success(interpretacion)
         else:
             st.info(interpretacion)
 
-    # Pestaña 3: Comparaciones
     with tab3:
         p_valor = anova.loc['Tratamientos', 'p-valor']
         if p_valor < alfa:
@@ -96,13 +89,11 @@ if not df.empty:
             df_tukey, dms, balanceado = tukey(df, col_trat, col_resp, alfa)
             if not balanceado:
                 st.warning("El diseño no está balanceado. La DMS calculada es aproximada.")
-            
             st.write(f"**Diferencia Mínima Significativa (DMS):** {dms:.4f}")
             st.dataframe(df_tukey)
         else:
-            st.info("No se realiza la prueba de Tukey porque no se rechazó la hipótesis nula (las medias se consideran estadísticamente iguales).")
+            st.info("No se realiza la prueba de Tukey porque no se rechazó la hipótesis nula.")
 
-    # Pestaña 4: Gráficos
     with tab4:
         st.subheader("Gráfico de Cajas (Boxplot)")
         fig_box = px.box(df, x=col_trat, y=col_resp, points="all", title="Distribución por Tratamiento",
@@ -113,3 +104,33 @@ if not df.empty:
         fig_medias = px.line(resumen, x='Tratamiento', y='Media', markers=True, error_y='Desviación',
                              title="Medias y Desviación Estándar por Tratamiento")
         st.plotly_chart(fig_medias, use_container_width=True)
+        
+    # Nueva Pestaña 5: Supuestos
+    with tab5:
+        st.subheader("Diagnóstico de Supuestos del Modelo")
+        st.write("**1. Normalidad:** Los residuos deben distribuirse normalmente (Prueba de Shapiro-Wilk).")
+        st.write("**2. Homogeneidad de Varianzas (Homocedasticidad):** La variabilidad debe ser similar en todos los tratamientos (Prueba de Levene).")
+        st.write("**3. Independencia:** Garantizada por la aleatorización de los lotes en los secadores durante el experimento.")
+        
+        residuos, ajustados = residuos_y_ajustados(modelo)
+        
+        # Pruebas estadísticas formales
+        stat_shapiro, p_shapiro, concl_shapiro = prueba_shapiro(residuos, alfa)
+        stat_levene, p_levene, concl_levene = prueba_levene(df, col_trat, col_resp, alfa)
+        
+        df_supuestos = pd.DataFrame({
+            "Supuesto": ["Normalidad (Shapiro-Wilk)", "Homogeneidad (Levene)"],
+            "Estadístico": [stat_shapiro, stat_levene],
+            "p-valor": [p_shapiro, p_levene],
+            "Conclusión": [concl_shapiro, concl_levene]
+        })
+        st.dataframe(df_supuestos.style.format({'Estadístico': '{:.4f}', 'p-valor': '{:.4f}'}))
+        
+        # Gráficos de validación
+        col_g1, col_g2 = st.columns(2)
+        with col_g1:
+            fig_qq = grafico_qq(residuos)
+            st.plotly_chart(fig_qq, use_container_width=True)
+        with col_g2:
+            fig_res = grafico_residuos_vs_ajustados(ajustados, residuos)
+            st.plotly_chart(fig_res, use_container_width=True)
